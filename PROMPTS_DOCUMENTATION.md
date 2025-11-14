@@ -248,3 +248,159 @@ Keep the response concise and relevant to the conversation.
 
 ---
 
+## Content Creation Prompts
+
+These prompts are used by content writer agents to create, structure, and refine written content. They demonstrate a multi-stage content production pipeline.
+
+### Content Outline Creation Prompt
+
+**Location:** `test/support/agents/writer.ex:52-78`
+
+**Purpose:** Generates detailed content outlines based on research input. This prompt creates structured frameworks for blog posts with hierarchical organization (sections, subsections, key points).
+
+**LLM Configuration:**
+- **Model:** Inherits from agent configuration
+- **Temperature:** `0.7` (creative yet structured)
+- **Response Format:** JSON with outline structure
+- **Schema:** Nested structure with title, sections, points, and subsections
+
+**Used In:** Writer agent's `create_outline` task handler
+
+**Prompt Template:**
+
+```
+Create a detailed outline based on this research:
+{research_data}
+
+Include:
+1. Introduction section
+2. Main sections with key points
+3. Supporting subsections
+4. Conclusion section
+
+Respond with a JSON object containing:
+{
+  "title": "proposed title",
+  "sections": [
+    {
+      "title": "section title",
+      "points": ["list", "of", "points"],
+      "subsections": [
+        {
+          "title": "subsection title",
+          "points": ["list", "of", "points"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Key Characteristics:**
+- Four-part structure requirement (intro, main, subsections, conclusion)
+- Hierarchical organization with nested subsections
+- Point-by-point breakdown for detailed planning
+- JSON output enforces structural consistency
+- Research-driven content planning
+- Designed for blog post workflows
+
+---
+
+### Blog Post Draft Writing Prompt
+
+**Location:** `test/support/agents/writer.ex:86-108`
+
+**Purpose:** Converts structured outlines into complete blog post drafts with metadata. This prompt focuses on content quality, flow, and engagement while maintaining alignment with the outline.
+
+**LLM Configuration:**
+- **Model:** Inherits from agent configuration
+- **Temperature:** `0.7` (balanced creativity)
+- **Response Format:** JSON with content and metadata
+- **Schema:** Title, full content, and metadata (word_count, reading_time, target_audience)
+
+**Used In:** Writer agent's `write_draft` task handler
+
+**Prompt Template:**
+
+```
+Write a blog post draft following this outline:
+{outline}
+
+Ensure:
+1. Engaging introduction
+2. Clear flow between sections
+3. Supporting evidence for claims
+4. Strong conclusion
+5. Appropriate tone and style
+
+Respond with a JSON object containing:
+{
+  "title": "final title",
+  "content": "full blog post content",
+  "metadata": {
+    "word_count": number,
+    "reading_time": "estimated reading time",
+    "target_audience": "intended audience"
+  }
+}
+```
+
+**Key Characteristics:**
+- Five-point quality framework (engagement, flow, evidence, conclusion, tone)
+- Outline-driven content generation
+- Rich metadata generation (word count, reading time, audience)
+- Comprehensive output including title and full content
+- Designed for publication-ready drafts
+- Supports content planning and analytics
+
+---
+
+### Content Editing and Refinement Prompt
+
+**Location:** `test/support/agents/writer.ex:116-138`
+
+**Purpose:** Reviews and improves existing content with detailed change tracking and quality metrics. This prompt acts as an editorial reviewer, providing both improved content and analytical feedback.
+
+**LLM Configuration:**
+- **Model:** Inherits from agent configuration
+- **Temperature:** `0.7` (balanced for editorial judgment)
+- **Response Format:** JSON with edited content, changes, and metrics
+- **Schema:** Edited content, change list, and improvement metrics (clarity, engagement, technical accuracy)
+
+**Used In:** Writer agent's `edit_content` task handler
+
+**Prompt Template:**
+
+```
+Edit and improve this content:
+{content}
+
+Focus on:
+1. Clarity and conciseness
+2. Grammar and style
+3. Flow and transitions
+4. Technical accuracy
+5. Engagement factor
+
+Respond with a JSON object containing:
+{
+  "edited_content": "improved content",
+  "changes_made": ["list", "of", "changes"],
+  "improvement_metrics": {
+    "clarity": "score 1-10",
+    "engagement": "score 1-10",
+    "technical_accuracy": "score 1-10"
+  }
+}
+```
+
+**Key Characteristics:**
+- Five-dimension editorial focus (clarity, grammar, flow, accuracy, engagement)
+- Change tracking for transparency and review
+- Quantitative quality metrics (1-10 scoring)
+- Both content and meta-analysis output
+- Supports iterative content refinement
+- Provides measurable improvement indicators
+
+---
+
