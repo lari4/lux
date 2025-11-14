@@ -486,3 +486,193 @@ Respond in the following JSON format:
 
 ---
 
+## Documentation and Example Prompts
+
+These prompts are used in documentation, guides, and tests to demonstrate the Lux framework capabilities. They serve as templates for users building their own agents.
+
+### Simple Assistant System Prompt
+
+**Location:** `guides/agents.livemd:68-70`
+
+**Purpose:** Basic example demonstrating minimal agent configuration. This prompt establishes a generic helpful assistant that serves as the foundation for understanding agent creation in Lux.
+
+**LLM Configuration:**
+- **Model:** `gpt-4o-mini` (default)
+- **Temperature:** Not specified (uses default)
+- **Response Format:** Plain text
+
+**Used In:** Documentation examples for basic agent creation
+
+**System Prompt:**
+
+```
+You are Simple Assistant, a helpful assistant that can engage in conversations.
+Your goal is: Help users by providing clear and accurate responses
+```
+
+**Key Characteristics:**
+- Minimal configuration example
+- Clear role definition
+- Single-sentence goal statement
+- Serves as foundation for more complex agents
+
+---
+
+### Research Assistant System Prompt (Multi-Agent Example)
+
+**Location:** `guides/multi_agent_collaboration.livemd:52-54`
+
+**Purpose:** Demonstrates a specialized agent in a multi-agent system. This prompt defines a research-focused agent that collaborates with other agents (e.g., content writers) to complete complex workflows.
+
+**LLM Configuration:**
+- **Model:** `gpt-4o-mini`
+- **Max Tokens:** `500`
+- **Temperature:** Not specified
+- **Capabilities:** `[:research, :analysis]`
+
+**Used In:** Multi-agent collaboration guide
+
+**System Prompt:**
+
+```
+You are a Research Assistant specialized in finding and analyzing information.
+Work with other agents to provide comprehensive research results.
+```
+
+**Key Characteristics:**
+- Specialization definition (research and analysis)
+- Multi-agent collaboration instruction
+- Capability-based agent selection
+- Designed for agent hub integration
+
+---
+
+### Content Writer System Prompt (Multi-Agent Example)
+
+**Location:** `guides/multi_agent_collaboration.livemd:73-75`
+
+**Purpose:** Demonstrates a complementary agent in a multi-agent workflow. This prompt defines a content creation agent that receives research from the Research Assistant and transforms it into engaging articles.
+
+**LLM Configuration:**
+- **Model:** `gpt-4o-mini`
+- **Max Tokens:** `500`
+- **Temperature:** Not specified
+- **Capabilities:** `[:writing, :editing]`
+
+**Used In:** Multi-agent collaboration guide
+
+**System Prompt:**
+
+```
+You are a Content Writer specialized in creating engaging content.
+Work with researchers to transform their findings into compelling articles.
+```
+
+**Key Characteristics:**
+- Complementary to Research Assistant
+- Explicit inter-agent collaboration
+- Specialization in content transformation
+- Pipeline-based workflow design
+
+---
+
+### Research Assistant System Prompt (Integration Tests)
+
+**Location:** `test/integration/agent_chat_test.exs:62-66`
+
+**Purpose:** Integration test agent for validating real OpenAI API interactions. This prompt ensures consistent behavior in automated tests with deterministic responses (temperature 0.0, fixed seed).
+
+**LLM Configuration:**
+- **Model:** `gpt-4o-mini` (cheapest model for testing)
+- **Temperature:** `0.0` (deterministic responses for testing)
+- **Seed:** `42` (fixed seed for reproducibility)
+- **Receive Timeout:** `30,000ms`
+
+**Used In:** Integration tests for agent chat functionality
+
+**System Prompt:**
+
+```
+You are Research Assistant. An AI research assistant specialized in scientific literature and analysis
+Your goal is: Help researchers find, understand, and analyze scientific papers
+Respond to the user's message in a helpful and engaging way.
+```
+
+**Key Characteristics:**
+- Zero temperature for test determinism
+- Fixed seed for reproducible responses
+- Scientific domain specialization
+- Validates persona consistency across multiple chat interactions
+- Tests memory integration and context maintenance
+
+---
+
+### Memory-Enabled Assistant System Prompt (Integration Tests)
+
+**Location:** `test/integration/agent_chat_test.exs:128-132`
+
+**Purpose:** Integration test agent specifically designed to validate memory functionality. This prompt tests conversation context retention and recall across multiple interactions.
+
+**LLM Configuration:**
+- **Model:** `gpt-4o-mini`
+- **Temperature:** `0.0` (deterministic)
+- **Max Tokens:** `50` (constrained for testing)
+- **Seed:** `42`
+- **Memory Backend:** `SimpleMemory`
+
+**Used In:** Integration tests for memory-enabled chat
+
+**System Prompt:**
+
+```
+You are Memory-Enabled Assistant. An assistant that remembers past interactions
+Your goal is: Help users while maintaining context of conversations
+Respond to the user's message in a helpful and engaging way.
+```
+
+**Key Characteristics:**
+- Tests memory storage and retrieval
+- Validates context inclusion in subsequent chats
+- Tests max_memory_context limits
+- Verifies memory enable/disable functionality
+- Role-based message storage (:user, :assistant)
+- Timestamped interaction tracking
+
+---
+
+## Summary
+
+### Prompt Design Patterns
+
+Across all prompts in the Lux system, several consistent patterns emerge:
+
+1. **Identity Declaration**: "You are {Name}, {role/specialization}"
+2. **Goal Statement**: Explicit purpose or objective
+3. **Capability/Responsibility Enumeration**: Clear task boundaries
+4. **Output Format Specification**: JSON schemas or plain text
+5. **Temperature Tuning**:
+   - 0.0-0.3: Conservative, deterministic (risk management, testing)
+   - 0.7: Balanced (most agents)
+   - 0.8+: Creative (content generation)
+6. **Model Selection**:
+   - `gpt-4`: Complex reasoning, reflection
+   - `gpt-4o-mini`: Cost-efficient operations, most agents
+
+### Prompt Categories by Function
+
+- **Decision-Making**: Risk Manager (0.3 temp), Task Analysis
+- **Content Generation**: Writer prompts (0.7 temp), outline/draft/edit pipeline
+- **Analysis**: Market Researcher (0.7 temp), Reflection
+- **Interaction**: Chat prompts, multi-agent collaboration
+- **Meta-Cognitive**: Reflection and learning prompts
+
+### Integration Points
+
+Prompts integrate with Lux framework through:
+- **System Messages**: `llm_config.messages` with role="system"
+- **Dynamic Templates**: Runtime substitution of agent properties
+- **JSON Schemas**: Structured response enforcement
+- **Tool Calling**: OpenAI function calling for beams/prisms/lenses
+- **Memory Context**: Conversation history injection
+- **Signal Handlers**: Event-driven prompt execution
+
