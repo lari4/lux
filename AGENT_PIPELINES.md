@@ -626,3 +626,609 @@ Value: {
 
 ---
 
+## Company and Multi-Agent Workflows
+
+### Pipeline 4: Company Objective Execution (CEO-Worker Pattern)
+
+**Purpose:** Hierarchical task delegation from CEO to worker agents based on capabilities
+
+**Source Files:**
+- `lib/lux/company/execution_engine/objective_process.ex`
+- `lib/lux/agent/companies/signal_handler/default_implementation.ex`
+- `lib/lux/schemas/companies/objective_signal.ex`
+- `lib/lux/schemas/companies/task_signal.ex`
+
+**Complete Pipeline:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│          PHASE 1: Objective Initialization                      │
+└─────────────────────────────────────────────────────────────────┘
+
+Company.run_objective(company_pid, objective_id, input_data)
+                         │
+                         ▼
+              ┌──────────────────────────┐
+              │  Create Objective        │
+              │  Process                 │
+              │                          │
+              │  State: PENDING          │
+              │  Steps: [...steps...]    │
+              │  Progress: 0%            │
+              └──────────┬───────────────┘
+                         │
+                         │ initialize()
+                         ▼
+              ┌──────────────────────────┐
+              │  State: INITIALIZING     │
+              └──────────┬───────────────┘
+                         │
+                         │ start()
+                         ▼
+              ┌──────────────────────────┐
+              │  State: IN_PROGRESS      │
+              └──────────┬───────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│          PHASE 2: CEO Evaluation Loop                           │
+└─────────────────────────────────────────────────────────────────┘
+                         │
+                         │ Create ObjectiveSignal
+                         ▼
+              ┌──────────────────────────────────┐
+              │  ObjectiveSignal                 │
+              │  Type: "evaluate"                │
+              │  Payload: {                      │
+              │    objective_id,                 │
+              │    title,                        │
+              │    steps: [                      │
+              │      {index: 0, status:          │
+              │       "pending", ...},           │
+              │      ...                         │
+              │    ],                            │
+              │    context: {                    │
+              │      available_agents,           │
+              │      progress: 0                 │
+              │    }                             │
+              │  }                               │
+              │  Recipient: CEO Agent            │
+              └──────────┬───────────────────────┘
+                         │
+                         │ Routed to CEO
+                         ▼
+              ┌──────────────────────────┐
+              │  CEO Agent               │
+              │  handle_objective_       │
+              │  evaluation()            │
+              └──────────┬───────────────┘
+                         │
+                         │ Calls evaluate_next_step()
+                         ▼
+              ┌─────────────────────────────────┐
+              │  Determine Next Step            │
+              │                                 │
+              │  1. Find next pending step      │
+              │     (status == "pending")       │
+              │                                 │
+              │  2. Get step's required         │
+              │     capabilities                │
+              │                                 │
+              │  3. Query AgentHub for agents   │
+              │     with matching capabilities  │
+              │                                 │
+              │  4. Select best available agent │
+              └──────────┬──────────────────────┘
+                         │
+                         │ Example:
+                         │ - Step 0: "Gather market data"
+                         │ - Required: [:data_collection]
+                         │ - Hub returns: [Data Agent]
+                         │ - Selected: Data Agent ID
+                         ▼
+              ┌──────────────────────────────────┐
+              │  Create Evaluation Response      │
+              │  {                               │
+              │    decision: "continue",         │
+              │    next_step_index: 0,           │
+              │    assigned_agent: "agent_123",  │
+              │    required_capabilities:        │
+              │      [:data_collection],         │
+              │    reasoning: "Selected agent    │
+              │      with matching capabilities" │
+              │  }                               │
+              └──────────┬───────────────────────┘
+                         │
+                         │ Send back to Company
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│          PHASE 3: Task Assignment and Execution                 │
+└─────────────────────────────────────────────────────────────────┘
+                         │
+                         │ Company receives evaluation
+                         ▼
+              ┌──────────────────────────┐
+              │  Create TaskSignal       │
+              │  Type: "assignment"      │
+              │  Payload: {              │
+              │    task_id,              │
+              │    objective_id,         │
+              │    title: "Gather...",   │
+              │    description: "...",   │
+              │    required_capabilities,│
+              │    context: {            │
+              │      tools: [...],       │
+              │      constraints,        │
+              │      previous_results    │
+              │    }                     │
+              │  }                       │
+              │  Recipient: Data Agent   │
+              └──────────┬───────────────┘
+                         │
+                         │ Routed to assigned agent
+                         ▼
+              ┌──────────────────────────┐
+              │  Data Agent              │
+              │  handle_task_            │
+              │  assignment()            │
+              └──────────┬───────────────┘
+                         │
+                         │ Check capabilities match
+                         ▼
+              ┌───────────────────────────┐
+              │  Capability Check         │
+              │                           │
+              │  Required: [:data_...     │
+              │            collection]    │
+              │  Agent has: [:data_...    │
+              │              collection,  │
+              │              :analysis]   │
+              │                           │
+              │  Match? ✓ YES             │
+              └──────────┬────────────────┘
+                         │
+                         ▼
+              ┌───────────────────────────┐
+              │  Execute Task             │
+              │                           │
+              │  May involve:             │
+              │  - Running prisms/beams   │
+              │  - LLM calls              │
+              │  - External API calls     │
+              └──────────┬────────────────┘
+                         │
+                         │ Example: Use HyperliquidTokenInfoPrism
+                         ▼
+              ┌──────────────────────────────┐
+              │  Task Result                 │
+              │  {                           │
+              │    success: true,            │
+              │    output: {                 │
+              │      prices: {...},          │
+              │      volume: {...}           │
+              │    },                        │
+              │    artifacts: []             │
+              │  }                           │
+              └──────────┬───────────────────┘
+                         │
+                         │ Create completion signal
+                         ▼
+              ┌──────────────────────────┐
+              │  TaskSignal              │
+              │  Type: "completion"      │
+              │  Payload: {              │
+              │    task_id,              │
+              │    objective_id,         │
+              │    status: "completed",  │
+              │    result: {...}         │
+              │  }                       │
+              │  Recipient: CEO Agent    │
+              └──────────┬───────────────┘
+                         │
+                         │ Routed back to CEO
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│          PHASE 4: Progress Update and Iteration                 │
+└─────────────────────────────────────────────────────────────────┘
+                         │
+                         │ CEO receives completion
+                         ▼
+              ┌──────────────────────────┐
+              │  Update Objective        │
+              │  Progress                │
+              │                          │
+              │  - Mark step 0 complete  │
+              │  - Store results         │
+              │  - Calculate progress    │
+              │    (1/3 = 33%)           │
+              └──────────┬───────────────┘
+                         │
+                         │ More steps?
+                         ▼
+                    ┌────┴────┐
+                    │ Branch  │
+                    └────┬────┘
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+        More steps              All complete
+              │                     │
+              │                     ▼
+              │          ┌──────────────────────────┐
+              │          │  ObjectiveSignal         │
+              │          │  Type: "completion"      │
+              │          │  Payload: {              │
+              │          │    objective_id,         │
+              │          │    status: "completed",  │
+              │          │    progress: 100,        │
+              │          │    final_result: {...},  │
+              │          │    artifacts: [...]      │
+              │          │  }                       │
+              │          └──────────────────────────┘
+              │                     │
+              │                     ▼
+              │          ┌──────────────────────────┐
+              │          │  Company State:          │
+              │          │  COMPLETED               │
+              │          └──────────────────────────┘
+              │
+              │ Loop back to PHASE 2 (evaluate next step)
+              ▼
+      (Repeat for steps 1, 2, etc.)
+```
+
+**Data Flow Through Prompts:**
+
+```
+Step 0: CEO Evaluation
+  ↓
+  Prompt: (No explicit LLM prompt in default implementation)
+  Logic:  Pure Elixir - find next pending step, match capabilities
+  Output: {decision, next_step_index, assigned_agent, reasoning}
+  ↓
+Step 1: Task Assignment
+  ↓
+  Signal: TaskSignal with context
+  Input:  {task description, required capabilities, context}
+  ↓
+Step 2: Agent Execution
+  ↓
+  Prompt: (Agent-specific, may use Task Analysis/Execution prompts)
+
+  Task Analysis Prompt:
+  "Analyze this task and determine if it is possible to complete
+   with the available tools:
+   Title: {task_title}
+   Description: {task_description}
+
+   Consider:
+   1. Is this task possible to complete with the available tools?
+   2. What type of task is this?
+   3. What tools might be needed?
+   4. What should the output look like?
+   5. Are there any constraints to consider?
+   6. What artifacts should be produced?
+   7. Are the requirements clear and complete?"
+
+  Output: {feasibility: {possible: true/false, reason: "..."}}
+  ↓
+
+  If feasible, Task Execution Prompt:
+  "Given this task analysis:
+   {formatted_analysis}
+
+   Execute the task using the available tools.
+   Determine:
+   1. Which tools to use
+   2. What parameters to provide
+   3. How to combine the results
+
+   If at any point you determine the task cannot be completed,
+   explain why."
+
+  Output: Task result (success/failure with data)
+  ↓
+Step 3: Result Storage
+  ↓
+  TaskSignal(type: "completion")
+  Result stored in objective context
+  Available to subsequent steps
+  ↓
+Step 4: Progress Calculation
+  ↓
+  completed_steps / total_steps * 100
+  Update objective state
+```
+
+**Agent Collaboration Pattern:**
+
+```
+         AgentHub
+             │
+             │ Provides agent registry
+             ▼
+         CEO Agent
+             │
+             ├─ Queries capabilities
+             ├─ Selects agents
+             └─ Assigns tasks
+             │
+             ▼
+    ┌────────┴─────────┬──────────┐
+    │                  │          │
+Data Agent      Analysis Agent  Writer Agent
+[:data_...]     [:analysis]     [:writing,
+ collection]                     :editing]
+    │                  │          │
+    └──────────────────┴──────────┘
+             │
+             │ All report back to CEO
+             ▼
+         CEO Agent
+             │
+             └─ Assembles final result
+```
+
+---
+
+### Pipeline 5: Content Creation Multi-Agent Workflow
+
+**Purpose:** Research → Outline → Draft → Edit pipeline with specialized agents
+
+**Source Files:**
+- `test/support/agents/writer.ex`
+- `guides/multi_agent_collaboration.livemd`
+
+**Pipeline Diagram:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                STEP 1: Research Phase                           │
+└─────────────────────────────────────────────────────────────────┘
+
+User Request: "Create blog post about benefits of exercise"
+              │
+              ▼
+     ┌────────────────────┐
+     │  Research Agent    │
+     │  Capabilities:     │
+     │  [:research,       │
+     │   :analysis]       │
+     └─────────┬──────────┘
+               │
+               │ System Prompt:
+               │ "You are a Research Assistant specialized in
+               │  finding and analyzing information.
+               │  Work with other agents to provide comprehensive
+               │  research results."
+               │
+               │ User Prompt:
+               │ "Research the benefits of exercise"
+               ▼
+     ┌────────────────────┐
+     │  LLM Research      │
+     │  Model: gpt-4o-mini│
+     │  Max tokens: 500   │
+     └─────────┬──────────┘
+               │
+               │ Research findings
+               ▼
+     ┌────────────────────────────┐
+     │  Research Result           │
+     │  {                         │
+     │    topic: "Exercise",      │
+     │    key_findings: [         │
+     │      "Improves cardio...", │
+     │      "Reduces stress...",  │
+     │      "Enhances mood..."    │
+     │    ],                      │
+     │    sources: [...]          │
+     │  }                         │
+     └─────────┬──────────────────┘
+               │
+               │ Pass to next agent
+               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                STEP 2: Outline Creation                         │
+└─────────────────────────────────────────────────────────────────┘
+               │
+               ▼
+     ┌────────────────────┐
+     │  Writer Agent      │
+     │  Task: create_     │
+     │        outline     │
+     └─────────┬──────────┘
+               │
+               │ Prompt:
+               │ "Create a detailed outline based on this research:
+               │  {research}
+               │
+               │  Include:
+               │  1. Introduction section
+               │  2. Main sections with key points
+               │  3. Supporting subsections
+               │  4. Conclusion section
+               │
+               │  Respond with a JSON object containing:
+               │  {
+               │    title: 'proposed title',
+               │    sections: [
+               │      {title, points, subsections: [{...}]}
+               │    ]
+               │  }"
+               ▼
+     ┌────────────────────┐
+     │  LLM Processing    │
+     │  Temperature: 0.7  │
+     └─────────┬──────────┘
+               │
+               │ Structured outline
+               ▼
+     ┌──────────────────────────────────┐
+     │  Outline Result                  │
+     │  {                               │
+     │    title: "10 Amazing Benefits   │
+     │             of Regular Exercise",│
+     │    sections: [                   │
+     │      {                           │
+     │        title: "Physical Health", │
+     │        points: ["Cardio", ...],  │
+     │        subsections: [...]        │
+     │      },                          │
+     │      {                           │
+     │        title: "Mental Health",   │
+     │        ...                       │
+     │      }                           │
+     │    ]                             │
+     │  }                               │
+     └─────────┬────────────────────────┘
+               │
+               │ Pass to draft generation
+               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                STEP 3: Draft Writing                            │
+└─────────────────────────────────────────────────────────────────┘
+               │
+               ▼
+     ┌────────────────────┐
+     │  Writer Agent      │
+     │  Task: write_draft │
+     └─────────┬──────────┘
+               │
+               │ Prompt:
+               │ "Write a blog post draft following this outline:
+               │  {outline}
+               │
+               │  Ensure:
+               │  1. Engaging introduction
+               │  2. Clear flow between sections
+               │  3. Supporting evidence for claims
+               │  4. Strong conclusion
+               │  5. Appropriate tone and style
+               │
+               │  Respond with a JSON object containing:
+               │  {
+               │    title: 'final title',
+               │    content: 'full blog post content',
+               │    metadata: {
+               │      word_count: number,
+               │      reading_time: '5 min',
+               │      target_audience: '...'
+               │    }
+               │  }"
+               ▼
+     ┌────────────────────┐
+     │  LLM Processing    │
+     │  Temperature: 0.7  │
+     └─────────┬──────────┘
+               │
+               │ Complete draft
+               ▼
+     ┌──────────────────────────────────┐
+     │  Draft Result                    │
+     │  {                               │
+     │    title: "10 Amazing Benefits   │
+     │            of Regular Exercise", │
+     │    content: "Exercise is one of  │
+     │              the most powerful...",
+     │    metadata: {                   │
+     │      word_count: 1200,           │
+     │      reading_time: "6 min",      │
+     │      target_audience: "Adults    │
+     │        interested in fitness"    │
+     │    }                             │
+     │  }                               │
+     └─────────┬────────────────────────┘
+               │
+               │ Pass to editing
+               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                STEP 4: Content Editing                          │
+└─────────────────────────────────────────────────────────────────┘
+               │
+               ▼
+     ┌────────────────────┐
+     │  Writer Agent      │
+     │  Task: edit_content│
+     └─────────┬──────────┘
+               │
+               │ Prompt:
+               │ "Edit and improve this content:
+               │  {content}
+               │
+               │  Focus on:
+               │  1. Clarity and conciseness
+               │  2. Grammar and style
+               │  3. Flow and transitions
+               │  4. Technical accuracy
+               │  5. Engagement factor
+               │
+               │  Respond with a JSON object containing:
+               │  {
+               │    edited_content: 'improved content',
+               │    changes_made: ['list', 'of', 'changes'],
+               │    improvement_metrics: {
+               │      clarity: 'score 1-10',
+               │      engagement: 'score 1-10',
+               │      technical_accuracy: 'score 1-10'
+               │    }
+               │  }"
+               ▼
+     ┌────────────────────┐
+     │  LLM Processing    │
+     │  Temperature: 0.7  │
+     └─────────┬──────────┘
+               │
+               │ Edited content with metrics
+               ▼
+     ┌──────────────────────────────────┐
+     │  Final Result                    │
+     │  {                               │
+     │    edited_content: "...",        │
+     │    changes_made: [               │
+     │      "Improved intro clarity",   │
+     │      "Added transition phrases", │
+     │      "Fixed grammar in para 3"   │
+     │    ],                            │
+     │    improvement_metrics: {        │
+     │      clarity: "9",               │
+     │      engagement: "8",             │
+     │      technical_accuracy: "10"    │
+     │    }                             │
+     │  }                               │
+     └──────────────────────────────────┘
+```
+
+**Prompt Chain Summary:**
+
+```
+Research Prompt (Agent 1)
+  ↓ research findings
+Outline Prompt (Agent 2)
+  ↓ structured outline
+Draft Prompt (Agent 2)
+  ↓ complete draft
+Edit Prompt (Agent 2)
+  ↓ final polished content
+```
+
+**Data Transformations:**
+
+1. **User Request → Research Findings**
+   - Prompt: Research agent system prompt + topic
+   - Output: Key findings, sources, summary
+
+2. **Research → Outline**
+   - Prompt: Outline creation prompt + research data
+   - Output: Hierarchical structure (title, sections, points, subsections)
+
+3. **Outline → Draft**
+   - Prompt: Draft writing prompt + outline
+   - Output: Full content + metadata (word count, reading time, audience)
+
+4. **Draft → Edited Content**
+   - Prompt: Editing prompt + draft
+   - Output: Improved content + change log + quality metrics
+
+---
+
