@@ -111,3 +111,99 @@ and your reasoning.
 
 ---
 
+## Task Processing Prompts
+
+These prompts are used by the company signal handler to analyze and execute tasks. They enable dynamic task decomposition, tool selection, and execution planning.
+
+### Task Analysis Prompt
+
+**Location:** `lib/lux/agent/companies/signal_handler/default_implementation.ex:214-227`
+
+**Purpose:** Analyzes incoming tasks to determine feasibility, required tools, and execution strategy. This prompt helps the LLM evaluate whether a task can be completed with available resources and what approach should be taken.
+
+**LLM Configuration:**
+- **Model:** Inherits from agent/context configuration
+- **Temperature:** Inherits from agent/context configuration
+- **Response Format:** JSON with AnalysisFeasibilitySchema
+- **Schema:** Object with `feasibility.possible` (boolean) and `feasibility.reason` (string)
+
+**Used In:** Task assignment handling within company workflows
+
+**Prompt:**
+
+```
+Analyze this task and determine if it is possible to complete with the available tools:
+Title: {task_title}
+Description: {task_description}
+
+Consider:
+1. Is this task possible to complete with the available tools?
+2. What type of task is this?
+3. What tools might be needed?
+4. What should the output look like?
+5. Are there any constraints to consider?
+6. What artifacts should be produced?
+7. Are the requirements clear and complete?
+```
+
+**Key Characteristics:**
+- Comprehensive task evaluation framework (7 consideration points)
+- Feasibility assessment before execution attempts
+- Tool availability check against task requirements
+- Output format and artifact planning
+- Requirement completeness validation
+- JSON response enforces structured decision-making
+- Prevents wasted resources on impossible tasks
+
+---
+
+### Task Execution Prompt
+
+**Location:** `lib/lux/agent/companies/signal_handler/default_implementation.ex:284-295`
+
+**Purpose:** Guides the LLM to execute a previously analyzed task using available tools. This prompt receives the task analysis results and directs the agent to select appropriate tools, determine parameters, and combine results.
+
+**LLM Configuration:**
+- **Model:** Inherits from agent/context configuration
+- **Temperature:** Inherits from agent/context configuration
+- **Response Format:** Depends on task requirements
+- **Tools:** Full access to agent's beams, lenses, and prisms
+
+**Used In:** Task execution phase after successful analysis
+
+**Prompt Template:**
+
+```
+Given this task analysis:
+{formatted_analysis}
+
+Execute the task using the available tools.
+Determine:
+1. Which tools to use
+2. What parameters to provide
+3. How to combine the results
+
+If at any point you determine the task cannot be completed, explain why.
+```
+
+**Analysis Format Included:**
+
+The `{formatted_analysis}` contains:
+```
+Task Type: {task_type}
+Required Capabilities: {required_capabilities}
+Expected Outputs: {expected_outputs}
+Success Criteria: {success_criteria}
+```
+
+**Key Characteristics:**
+- Two-phase approach: analysis then execution
+- Tool selection guided by analysis results
+- Parameter determination based on task requirements
+- Result combination strategy
+- Graceful failure handling with explanations
+- Leverages OpenAI's native tool calling for tool execution
+- Context-aware execution based on prior analysis
+
+---
+
