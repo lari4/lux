@@ -207,3 +207,44 @@ Success Criteria: {success_criteria}
 
 ---
 
+## Chat and Interaction Prompts
+
+These prompts handle conversational interactions between agents and enable dynamic response generation based on agent configuration and context.
+
+### Agent Chat Response Prompt
+
+**Location:** `lib/lux/prisms/handle_chat.ex:65-74`
+
+**Purpose:** Generates contextual chat responses based on an agent's identity, goal, and incoming messages. This prompt enables agents to maintain consistent personality and purpose while engaging in conversations.
+
+**LLM Configuration:**
+- **Model:** Inherits from agent's llm_config
+- **Temperature:** Inherits from agent's llm_config
+- **Response Format:** Plain text response
+- **Tools:** Currently no tools passed (empty list), but designed to support agent's beams and prisms
+
+**Used In:** HandleChat prism for processing chat signals between agents
+
+**Prompt Template:**
+
+```
+You are {agent.name}, an AI agent with the following goal:
+{agent.goal}
+
+You received the following chat message:
+{message}
+
+Generate an appropriate response based on your goal and capabilities.
+Keep the response concise and relevant to the conversation.
+```
+
+**Key Characteristics:**
+- Dynamic agent identity injection (uses agent.name and agent.goal)
+- Goal-driven response generation
+- Conciseness emphasis for efficient communication
+- Relevance constraint to maintain conversation focus
+- Designed for inter-agent communication
+- Supports threaded conversations via context metadata
+
+---
+
