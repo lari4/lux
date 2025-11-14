@@ -1232,3 +1232,618 @@ Edit Prompt (Agent 2)
 
 ---
 
+## Signal-Based Workflows
+
+### Signal Architecture and Routing
+
+**Source Files:**
+- `lib/lux/signal.ex`
+- `lib/lux/signal/router.ex`
+- `lib/lux/agent.ex` (handle_info callbacks)
+
+**Complete Signal Flow:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Signal Creation                              │
+└─────────────────────────────────────────────────────────────────┘
+
+Agent A creates signal
+                │
+                ▼
+     ┌────────────────────────────────┐
+     │  %Lux.Signal{                  │
+     │    id: UUID,                   │
+     │    schema_id: TaskSignal,      │
+     │    payload: %{                 │
+     │      type: "assignment",       │
+     │      task_id: "...",           │
+     │      description: "...",       │
+     │      context: {...}            │
+     │    },                          │
+     │    sender: agent_a_id,         │
+     │    recipient: agent_b_id,      │
+     │    timestamp: DateTime,        │
+     │    metadata: %{...}            │
+     │  }                             │
+     └────────────┬───────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Signal Routing                               │
+└─────────────────────────────────────────────────────────────────┘
+                  │
+                  │ Signal.Router.route(signal, router: pid, hub: hub_pid)
+                  ▼
+     ┌────────────────────────────────┐
+     │  Signal Router Process         │
+     │                                │
+     │  1. Extract recipient ID       │
+     │  2. Query AgentHub for         │
+     │     recipient's PID            │
+     │  3. Verify recipient exists    │
+     └────────────┬───────────────────┘
+                  │
+                  ▼
+        ┌─────────┴──────────┐
+        │                    │
+   Recipient Found     Recipient Not Found
+        │                    │
+        ▼                    ▼
+     Send message      Return error
+     {:signal, sig}    {:error, :not_found}
+        │
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Signal Reception (Agent B)                     │
+└─────────────────────────────────────────────────────────────────┘
+        │
+        │ Agent B receives {:signal, signal}
+        ▼
+     ┌────────────────────────────────┐
+     │  Agent.handle_info/2           │
+     │  ({:signal, signal}, state)    │
+     └────────────┬───────────────────┘
+                  │
+                  │ Look up signal handler
+                  ▼
+     ┌────────────────────────────────┐
+     │  Find Handler for Schema       │
+     │                                │
+     │  agent.signal_handlers         │
+     │  |> Enum.find(fn {schema, _}  │
+     │       schema == signal.        │
+     │                 schema_id      │
+     │     end)                       │
+     └────────────┬───────────────────┘
+                  │
+                  ▼
+        ┌─────────┴──────────┐
+        │                    │
+   Handler Found         No Handler
+        │                    │
+        ▼                    ▼
+┌──────────────────┐   ┌───────────────┐
+│  Determine Type  │   │  Log warning  │
+└────────┬─────────┘   │  Ignore signal│
+         │             └───────────────┘
+         │
+         ▼
+  ┌──────┴──────┬──────────┬──────────┐
+  │             │          │          │
+Prism        Beam       Lens    Module/Function
+  │             │          │          │
+  ▼             ▼          ▼          ▼
+Execute     Execute    Execute   Call function
+with        workflow   data      with signal
+input       steps      fetch     and context
+  │             │          │          │
+  └─────────────┴──────────┴──────────┘
+                  │
+                  │ Handler execution result
+                  ▼
+     ┌────────────────────────────────┐
+     │  Process Handler Result        │
+     │                                │
+     │  {:ok, response_signal}        │
+     │  or                            │
+     │  {:error, reason}              │
+     └────────────┬───────────────────┘
+                  │
+                  ▼
+        ┌─────────┴──────────┐
+        │                    │
+    Success              Error
+        │                    │
+        ▼                    ▼
+┌──────────────────┐   ┌───────────────┐
+│  Route Response  │   │  Log error    │
+│  Signal back to  │   │  May send     │
+│  original sender │   │  error signal │
+└──────────────────┘   └───────────────┘
+```
+
+**Signal Handler Types:**
+
+```
+Signal Handler Configuration:
+  signal_handlers: [
+    {SchemaModule, HandlerSpec}
+  ]
+
+Handler Spec Types:
+
+1. Prism Handler:
+   {TaskSignal, MyPrism}
+   → Executes: MyPrism.handler(signal.payload, agent_context)
+
+2. Beam Handler:
+   {ObjectiveSignal, MyBeam}
+   → Executes: MyBeam.run(signal.payload, agent_context)
+
+3. Lens Handler:
+   {DataRequestSignal, MyLens}
+   → Executes: MyLens.fetch(signal.payload, agent_context)
+
+4. Module/Function Handler:
+   {TaskSignal, {MyModule, :my_function}}
+   → Executes: MyModule.my_function(signal, agent_context)
+```
+
+**Signal Schemas:**
+
+```
+1. TaskSignal
+   Payload Types:
+   - "assignment" → New task for agent
+   - "status_update" → Progress update
+   - "completion" → Task finished successfully
+   - "failure" → Task failed with error
+
+2. ObjectiveSignal
+   Payload Types:
+   - "evaluate" → CEO evaluates next step
+   - "next_step" → CEO assigns next step
+   - "status_update" → Progress update
+   - "completion" → Objective completed
+
+3. ChatSignal
+   Payload Types:
+   - "user" → Message from user
+   - "response" → Agent response
+   - "error" → Error message
+
+4. TradeProposalSignal
+   Payload Types:
+   - Trade proposal data
+   → Handled by TradeProposalPrism
+```
+
+---
+
+## Summary and Key Patterns
+
+### Common Pipeline Patterns
+
+#### 1. Linear Sequential Pipeline
+
+```
+Input
+  ↓
+[Step 1: Process A] → Prompt A → LLM → Result A
+  ↓
+[Step 2: Process B] → Prompt B (uses Result A) → LLM → Result B
+  ↓
+[Step 3: Process C] → Prompt C (uses Result B) → LLM → Final Output
+```
+
+**Examples:**
+- Content creation (Research → Outline → Draft → Edit)
+- Each step uses output from previous step
+- Linear data dependency
+
+#### 2. Parallel with Merge Pipeline
+
+```
+Input
+  ↓
+  ├─ [Parallel Step 1] → Result 1
+  ├─ [Parallel Step 2] → Result 2
+  └─ [Parallel Step 3] → Result 3
+  ↓
+[Merge/Combine] → Uses all parallel results
+  ↓
+Final Output
+```
+
+**Examples:**
+- Trading workflow (Portfolio State + Market Data in parallel)
+- Independent data gathering operations
+- Results combined for decision-making
+
+#### 3. Conditional Branching Pipeline
+
+```
+Input
+  ↓
+[Evaluation Step] → Decision
+  ↓
+  ├─ Condition A → [Branch A Steps] → Output A
+  ├─ Condition B → [Branch B Steps] → Output B
+  └─ Default → [Default Steps] → Output Default
+```
+
+**Examples:**
+- Risk management (approve/reject based on thresholds)
+- Task routing (based on capabilities)
+- Error handling (retry/fallback/fail)
+
+#### 4. Event-Driven Multi-Agent Pipeline
+
+```
+Agent A
+  ↓
+  Creates Signal
+  ↓
+  Router
+  ↓
+Agent B
+  ↓
+  Processes
+  ↓
+  Creates Response Signal
+  ↓
+  Router
+  ↓
+Agent A
+```
+
+**Examples:**
+- Company objective execution (CEO → Workers → CEO)
+- Agent collaboration (Research → Writing)
+- Asynchronous task distribution
+
+#### 5. Memory-Enhanced Conversational Pipeline
+
+```
+User Message
+  ↓
+Retrieve Memory Context (Last N interactions)
+  ↓
+Enrich Prompt with Historical Context
+  ↓
+LLM Processing
+  ↓
+Store User Message + Response in Memory
+  ↓
+Return Response
+```
+
+**Examples:**
+- Chat with memory
+- Context retention across conversations
+- Learning from past interactions
+
+---
+
+### Prompt Chaining Patterns
+
+#### 1. Analysis → Execution Chain
+
+```
+Task Input
+  ↓
+Analysis Prompt:
+  "Analyze this task and determine if it is possible..."
+  ↓
+Feasibility Result: {possible: true/false, reason}
+  ↓
+IF possible:
+  Execution Prompt:
+    "Given this task analysis: {analysis}
+     Execute the task using available tools..."
+  ↓
+  Execution Result
+```
+
+**Used in:** Task processing, company workflows
+
+#### 2. Proposal → Evaluation → Action Chain
+
+```
+Market Data
+  ↓
+Proposal Prompt (Market Researcher):
+  "Analyze cryptocurrency markets and propose trades..."
+  ↓
+Trade Proposal: {coin, is_buy, sz, limit_px, rationale}
+  ↓
+Evaluation Prompt (Risk Manager):
+  "Evaluate trade proposals and executing trades that
+   meet risk criteria..."
+  ↓
+Decision: {execute_trade: boolean, reasoning}
+  ↓
+IF execute_trade:
+  Risk Assessment Beam (No prompt, Python calculations)
+  ↓
+  Execution
+```
+
+**Used in:** Trading workflows
+
+#### 3. Progressive Refinement Chain
+
+```
+Raw Input (Research)
+  ↓
+Structure Prompt:
+  "Create a detailed outline based on this research..."
+  ↓
+Outline
+  ↓
+Expansion Prompt:
+  "Write a blog post draft following this outline..."
+  ↓
+Draft
+  ↓
+Refinement Prompt:
+  "Edit and improve this content..."
+  ↓
+Final Content
+```
+
+**Used in:** Content creation workflows
+
+---
+
+### Data Transformation Patterns
+
+#### 1. Enrichment Pattern
+
+```
+Basic Data → Context Addition → Enriched Data
+
+Example:
+User Message
+  + Agent Identity (name, goal)
+  + Memory Context (past interactions)
+  + Available Tools (beams, prisms)
+  ↓
+Enriched Prompt for LLM
+```
+
+#### 2. Aggregation Pattern
+
+```
+Multiple Sources → Combine → Single Result
+
+Example:
+Portfolio State + Market Prices + Proposed Trade
+  ↓
+Risk Calculation (Python)
+  ↓
+Unified Risk Metrics
+```
+
+#### 3. Transformation Pattern
+
+```
+Input Format A → Conversion → Output Format B
+
+Example:
+Memory Entries (ETS table)
+  ↓
+Convert to LLM message format
+  ↓
+[{role: "user", content: "..."}, ...]
+```
+
+#### 4. Filtering Pattern
+
+```
+Large Dataset → Filter Criteria → Subset
+
+Example:
+All Agents in Hub
+  ↓
+Filter by capability: :research
+  ↓
+Research Agents Only
+```
+
+---
+
+### Integration Points Summary
+
+#### LLM Integration
+
+```
+Agent Configuration
+  ↓
+LLM Config (model, temperature, messages)
+  + Tool Definitions (beams, prisms, lenses)
+  + Memory Context (if enabled)
+  ↓
+LLM.call(prompt, tools, config)
+  ↓
+OpenAI API
+  ↓
+Response (text | tool_calls | error)
+  ↓
+Process response
+  ├─ Execute tool calls
+  ├─ Store in memory
+  └─ Return to user/agent
+```
+
+#### Python Integration
+
+```
+Elixir Agent
+  ↓
+Prism with ~PY"""..."""
+  ↓
+Lux.Python module
+  ↓
+Venomous library (Python bridge)
+  ↓
+Python execution
+  ├─ NumPy calculations
+  ├─ Hyperliquid SDK
+  └─ ML models
+  ↓
+Return to Elixir as native types
+```
+
+#### Blockchain Integration
+
+```
+Agent/Prism
+  ↓
+Ethers library
+  ↓
+Ethereum RPC calls
+  ├─ Contract interactions
+  ├─ Balance queries
+  ├─ Transaction submission
+  └─ Event listening
+  ↓
+Return blockchain data
+```
+
+#### Memory Integration
+
+```
+Agent with memory_config
+  ↓
+SimpleMemory backend (ETS)
+  ↓
+Operations:
+  ├─ store(entry)
+  ├─ recent(n)
+  ├─ window(start, end)
+  └─ search(query)
+  ↓
+Used in chat for context
+```
+
+---
+
+### Error Handling Patterns
+
+#### 1. Retry with Backoff
+
+```
+Step Execution
+  ↓
+Error
+  ↓
+Retries remaining?
+  YES → Wait (backoff) → Retry
+  NO → Check fallback
+```
+
+#### 2. Fallback Pattern
+
+```
+Primary execution
+  ↓
+Failure
+  ↓
+Fallback defined?
+  YES → Execute fallback → Continue or Stop
+  NO → Propagate error
+```
+
+#### 3. Graceful Degradation
+
+```
+Full feature execution
+  ↓
+Error
+  ↓
+Return partial result with error flag
+  {status: "partial", data: {...}, error: "..."}
+```
+
+---
+
+### Performance Considerations
+
+#### Parallel Execution
+
+- Use parallel beam steps for independent operations
+- Example: Fetch portfolio and market data simultaneously
+- Reduces total pipeline time
+
+#### Memory Context Limits
+
+- Control `max_memory_context` to limit token usage
+- Default: 5 recent interactions
+- Balance between context and cost
+
+#### Model Selection
+
+- Use `gpt-4o-mini` for cost-efficient operations
+- Reserve `gpt-4` for complex reasoning (reflection, strategy)
+- Temperature tuning: 0.0-0.3 (conservative) vs 0.7+ (creative)
+
+#### Tool Call Optimization
+
+- Minimize tool definitions passed to LLM (only relevant tools)
+- Use structured outputs (JSON schemas) for predictable parsing
+- Batch operations where possible
+
+---
+
+### Testing Patterns
+
+#### Integration Testing
+
+```elixir
+# Real OpenAI API calls
+# Deterministic responses: temperature=0.0, seed=42
+# Verify persona consistency across chats
+# Test memory retention and recall
+```
+
+#### Unit Testing
+
+```elixir
+# Mock LLM responses
+# Test signal routing
+# Verify capability matching
+# Test beam step orchestration
+```
+
+---
+
+## Workflow Summary Table
+
+| Workflow | Prompts Used | Data Flow | Agents/Tools | Key Features |
+|----------|-------------|-----------|--------------|--------------|
+| **Trading** | Market Researcher → Risk Manager | Market data → Proposal → Risk eval → Execution | Market Researcher, Risk Manager, Hyperliquid prisms/beams | Parallel data gathering, Python risk calc, conditional execution |
+| **Simple Chat** | Chat response prompt | User msg → LLM → Response | Any agent with HandleChat prism | Dynamic agent identity injection, goal-driven responses |
+| **Chat with Memory** | Chat response prompt + memory context | User msg → Memory lookup → Enriched prompt → LLM → Store & respond | Any agent with memory_config | Context retention, ETS storage, configurable window |
+| **Company Objective** | Task analysis → Task execution | Objective → CEO evaluation → Task assignment → Execution → Results | CEO agent, worker agents, AgentHub | Hierarchical delegation, capability-based routing, progress tracking |
+| **Content Creation** | Research → Outline → Draft → Edit | User request → Research → Structured outline → Full draft → Polished content | Research agent, Writer agent | Sequential refinement, progressive elaboration, quality metrics |
+| **Signal Routing** | N/A (signal handlers) | Signal creation → Router → Recipient → Handler execution → Response | Signal Router, AgentHub, all agents | Event-driven, async communication, typed signals |
+
+---
+
+## Conclusion
+
+The Lux agent system provides a sophisticated framework for building multi-agent AI applications with:
+
+- **Modular Tools**: Lenses (data), Prisms (actions), Beams (workflows)
+- **Flexible Orchestration**: Sequential, parallel, conditional execution
+- **Event-Driven Communication**: Signal-based routing with typed schemas
+- **Memory Integration**: Context retention across conversations
+- **Multi-Agent Collaboration**: Capability-based discovery and delegation
+- **Robust Error Handling**: Retries, fallbacks, graceful degradation
+- **External Integrations**: LLMs, Python, Blockchain, APIs
+
+Each pipeline demonstrates different patterns of prompt chaining, data transformation, and agent coordination, providing a comprehensive toolkit for building complex agentic systems.
+
