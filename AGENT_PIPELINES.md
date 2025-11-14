@@ -324,3 +324,305 @@ Lux uses a hierarchical tool system for building agent workflows:
 
 ---
 
+## Chat and Conversation Workflows
+
+### Pipeline 2: Simple Chat Interaction
+
+**Purpose:** User message → agent response with goal-driven prompting
+
+**Source Files:**
+- `lib/lux/prisms/handle_chat.ex`
+- `lib/lux/agent.ex` (chat function)
+
+**Pipeline Diagram:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    User Sends Chat Message                      │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            │ message: "Hello, how can you help me?"
+                            ▼
+              ┌──────────────────────────┐
+              │   Chat Signal Created    │
+              │   {                      │
+              │     message: "...",      │
+              │     message_type: "user",│
+              │     context: {...}       │
+              │   }                      │
+              └──────────┬───────────────┘
+                         │
+                         ▼
+              ┌──────────────────────────┐
+              │  HandleChat Prism        │
+              │  (Signal Handler)        │
+              └──────────┬───────────────┘
+                         │
+                         │ Build Dynamic Prompt
+                         ▼
+              ┌────────────────────────────────────┐
+              │ Prompt Template:                   │
+              │                                    │
+              │ "You are {agent.name}, an AI agent│
+              │  with the following goal:         │
+              │  {agent.goal}                     │
+              │                                    │
+              │  You received the following chat  │
+              │  message:                         │
+              │  {message}                        │
+              │                                    │
+              │  Generate an appropriate response │
+              │  based on your goal and           │
+              │  capabilities. Keep the response  │
+              │  concise and relevant to the      │
+              │  conversation."                   │
+              └────────────┬───────────────────────┘
+                           │
+                           │ Example filled:
+                           │ agent.name = "Research Assistant"
+                           │ agent.goal = "Help researchers find papers"
+                           │ message = "Hello, how can you help me?"
+                           ▼
+              ┌──────────────────────────┐
+              │    LLM Call              │
+              │    (Uses agent's config) │
+              └──────────┬───────────────┘
+                         │
+                         │ Response: "I'm a Research Assistant..."
+                         ▼
+              ┌──────────────────────────┐
+              │  Response Signal Created │
+              │  {                       │
+              │    message: "...",       │
+              │    message_type:         │
+              │      "response",         │
+              │    context: {            │
+              │      thread_id,          │
+              │      reply_to,           │
+              │      metadata            │
+              │    }                     │
+              │  }                       │
+              └──────────┬───────────────┘
+                         │
+                         ▼
+              ┌──────────────────────────┐
+              │  Return to User          │
+              └──────────────────────────┘
+```
+
+**Data Flow:**
+
+```
+User Message
+     │
+     ▼
+Chat Signal (Input Schema)
+     │
+     ├─ message: string
+     ├─ message_type: "user" | "system"
+     └─ context: {thread_id, metadata}
+     │
+     ▼
+Dynamic Prompt Construction
+     │
+     ├─ Insert agent.name
+     ├─ Insert agent.goal
+     └─ Insert user message
+     │
+     ▼
+LLM Processing
+     │
+     └─ Uses agent.llm_config
+        ├─ model
+        ├─ temperature
+        └─ system messages
+     │
+     ▼
+Chat Signal (Output Schema)
+     │
+     ├─ message: LLM response
+     ├─ message_type: "response"
+     └─ context: {thread_id, reply_to, sender_id}
+```
+
+---
+
+### Pipeline 3: Chat with Memory
+
+**Purpose:** Conversational agent with context retention across multiple interactions
+
+**Source Files:**
+- `lib/lux/agent.ex` (chat function with memory)
+- `lib/lux/memory/simple_memory.ex`
+
+**Pipeline Diagram:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                User Sends Message (use_memory: true)            │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            │ message: "My name is Alice"
+                            │ opts: [use_memory: true, max_memory_context: 5]
+                            ▼
+              ┌──────────────────────────┐
+              │  Check Memory Enabled?   │
+              └──────────┬───────────────┘
+                         │
+                         │ use_memory == true
+                         ▼
+              ┌──────────────────────────┐
+              │  Retrieve Recent Context │
+              │  from Memory             │
+              └──────────┬───────────────┘
+                         │
+                         │ Memory.recent(agent.memory_pid, max_context)
+                         ▼
+              ┌─────────────────────────────────────┐
+              │  Recent Interactions (Last N)       │
+              │  [{                                 │
+              │    content: "Previous user msg",    │
+              │    metadata: {role: :user}          │
+              │  }, {                               │
+              │    content: "Previous agent resp",  │
+              │    metadata: {role: :assistant}     │
+              │  }]                                 │
+              └──────────┬──────────────────────────┘
+                         │
+                         │ Convert to LLM message format
+                         ▼
+              ┌─────────────────────────────────────┐
+              │  Messages for LLM:                  │
+              │  [                                  │
+              │    {role: "system", content: "..."},│
+              │    {role: "user", content: "..."},  │
+              │    {role: "assistant", "..."},      │
+              │    {role: "user", content: "My      │
+              │     name is Alice"}  ← NEW          │
+              │  ]                                  │
+              └──────────┬──────────────────────────┘
+                         │
+                         │ Enriched context
+                         ▼
+              ┌──────────────────────────┐
+              │    LLM Call with         │
+              │    Historical Context    │
+              └──────────┬───────────────┘
+                         │
+                         │ Response: "Nice to meet you, Alice!"
+                         ▼
+              ┌──────────────────────────┐
+              │  Store User Message      │
+              │  in Memory               │
+              └──────────┬───────────────┘
+                         │
+                         │ Memory.store(pid, %{
+                         │   content: "My name is Alice",
+                         │   type: :interaction,
+                         │   metadata: %{role: :user}
+                         │ })
+                         ▼
+              ┌──────────────────────────┐
+              │  Store Assistant         │
+              │  Response in Memory      │
+              └──────────┬───────────────┘
+                         │
+                         │ Memory.store(pid, %{
+                         │   content: "Nice to meet you, Alice!",
+                         │   type: :interaction,
+                         │   metadata: %{role: :assistant}
+                         │ })
+                         ▼
+              ┌──────────────────────────┐
+              │  Return Response to User │
+              └──────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              Subsequent Message with Memory                     │
+└─────────────────────────────────────────────────────────────────┘
+                         │
+                         │ message: "What's my name?"
+                         │ opts: [use_memory: true]
+                         ▼
+              ┌──────────────────────────┐
+              │  Retrieve Recent Context │
+              └──────────┬───────────────┘
+                         │
+                         │ Now includes:
+                         │ - "My name is Alice" (user)
+                         │ - "Nice to meet you..." (assistant)
+                         │ - "What's my name?" (user) ← NEW
+                         ▼
+              ┌──────────────────────────┐
+              │    LLM Call with         │
+              │    Full Context          │
+              └──────────┬───────────────┘
+                         │
+                         │ Response: "Your name is Alice!"
+                         │ (LLM can answer from context)
+                         ▼
+              ┌──────────────────────────┐
+              │  Store Interaction       │
+              │  and Return              │
+              └──────────────────────────┘
+```
+
+**Memory Storage Structure:**
+
+```
+ETS Table (SimpleMemory)
+Key: {counter, timestamp}
+     │
+     ▼
+Value: {
+  id: counter (auto-increment),
+  content: any (message text, observation, etc.),
+  type: :observation | :reflection | :interaction | :system,
+  timestamp: unix_timestamp,
+  metadata: %{
+    role: :user | :assistant,
+    ... custom fields ...
+  }
+}
+```
+
+**Data Transformations:**
+
+1. **User Message → Memory Lookup**
+   - Input: Message + use_memory flag
+   - Action: Query ETS table for recent N entries
+   - Output: List of {content, metadata} tuples
+
+2. **Memory Entries → LLM Messages**
+   - Input: Memory entries with role metadata
+   - Transform: Convert to OpenAI message format
+   - Output: [{role: "user", content: "..."}, ...]
+
+3. **LLM Response → Memory Storage**
+   - Input: LLM response text
+   - Transform: Wrap in memory structure with timestamp
+   - Storage: Insert into ETS with auto-incrementing key
+
+**Memory Retrieval Methods:**
+
+```
+┌──────────────────────────────┐
+│   Memory Retrieval API       │
+└──────────────────────────────┘
+         │
+         ├─ recent(pid, n)
+         │  Returns: Last N entries (reverse chronological)
+         │  Use case: Chat context window
+         │
+         ├─ window(pid, start_time, end_time)
+         │  Returns: Entries within time range
+         │  Use case: Time-bounded context
+         │
+         └─ search(pid, query_string)
+            Returns: Entries matching text search
+            Use case: Semantic retrieval
+```
+
+---
+
