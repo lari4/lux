@@ -404,3 +404,85 @@ Respond with a JSON object containing:
 
 ---
 
+## Reflection and Learning Prompts
+
+These prompts enable agents to perform self-reflection, learn from experience, and adapt their behavior over time.
+
+### Agent Self-Reflection Prompt
+
+**Location:** `lib/lux/reflection.ex:116-149`
+
+**Purpose:** Enables agents to analyze their own performance, identify patterns, and plan future actions. This prompt implements a metacognitive loop where agents evaluate their history, learned patterns, and metrics to decide on next steps.
+
+**LLM Configuration:**
+- **Model:** `gpt-4` (default)
+- **Temperature:** `0.7`
+- **Max Tokens:** `1000`
+- **Response Format:** JSON with reflection analysis and action recommendations
+
+**Used In:** Reflection module's `reflect/3` function for periodic agent self-evaluation
+
+**Prompt Template:**
+
+```
+You are {agent.name}'s reflection process.
+Your goal is to help achieve: {agent.goal}
+
+Current context:
+{current_context}
+
+Recent history:
+{formatted_history}
+
+Learned patterns:
+{formatted_patterns}
+
+Performance metrics:
+{metrics}
+
+Based on this information, what actions should the agent take?
+Respond in the following JSON format:
+{
+  "reflection": {
+    "thoughts": "your reasoning process",
+    "patterns_identified": [],
+    "improvement_suggestions": []
+  },
+  "actions": [
+    {
+      "type": "prism|beam|lens",
+      "name": "action_name",
+      "params": {},
+      "expected_outcome": "description"
+    }
+  ]
+}
+```
+
+**Key Characteristics:**
+- Metacognitive design (agent reflecting on itself)
+- Multi-input analysis (context, history, patterns, metrics)
+- Pattern identification for learning
+- Action planning with expected outcomes
+- JSON structure enforces systematic thinking
+- History retention (last 5 reflections shown, 100 total stored)
+- Pattern accumulation (top 50 patterns maintained)
+- Performance tracking integration
+- Supports continuous improvement loop
+- Tool selection based on reflection (prisms, beams, lenses)
+
+**History Format:**
+```
+{timestamp}: {thoughts_from_previous_reflection}
+```
+
+**Metrics Included:**
+- `successful_actions`: Count of successful operations
+- `failed_actions`: Count of failed operations
+- `avg_response_time`: Average execution time
+- `learning_rate`: Adaptive learning coefficient (decreases over time)
+- `total_reflections`: Number of reflection cycles
+- `total_actions`: Cumulative actions taken
+
+---
+
